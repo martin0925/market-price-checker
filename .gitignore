@@ -1,0 +1,21 @@
+# SQLite databáze (scraper ji generuje lokálně, nesmí být v gitu)
+backend/data/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+*.egg-info/
+
+# Playwright browsers
+backend/ms-playwright/
+
+# Editor
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
