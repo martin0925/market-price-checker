@@ -7,7 +7,6 @@ class ItemCreate(BaseModel):
     name: str
     unit: str = "1 ks"
     category: str = "Ostatní"
-    query: str  # search term pro scraping
 
 
 class ItemOut(BaseModel):
@@ -15,7 +14,6 @@ class ItemOut(BaseModel):
     name: str
     unit: str
     category: str
-    query: str
     created_at: str
 
 
@@ -43,6 +41,21 @@ class StoreOut(BaseModel):
     color: str
     logo: str
     enabled: bool
+
+
+class ProductLinkCreate(BaseModel):
+    store_id: str
+    url: str
+    label: str = ""
+
+
+class ProductLinkOut(BaseModel):
+    id: int
+    item_id: int
+    store_id: str
+    url: str
+    label: str
+    active: bool
 
 
 class RefreshResult(BaseModel):

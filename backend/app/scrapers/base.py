@@ -2,6 +2,7 @@
 Sdílená základna pro všechny Playwright scrapery.
 """
 from playwright.async_api import async_playwright, Page, Browser, BrowserContext
+import json
 import re
 import logging
 
@@ -49,6 +50,84 @@ async def dismiss_cookies(page: Page):
             return
         except Exception:
             continue
+
+async def get_price_from_url(url: str) -> dict | None:
+    """
+    Generický scraper produktové stránky: JSON-LD → DOM fallback.
+    Používá se pro obchody bez vlastní implementace get_price_from_url.
+    """
+    async with async_playwright() as pw:
+        browser, context = await make_context(pw)
+        page = await context.new_page()
+        result = None
+        try:
+            await page.goto(url, wait_until="domcontentloaded", timeout=25_000)
+            await dismiss_cookies(page)
+
+            # 1) JSON-LD (schema.org/Product) — funguje pro většinu moderních e-shopů
+            jsonld_str = await page.evaluate("""() => {
+                for (const s of document.querySelectorAll('script[type="application/ld+json"]')) {
+                    try {
+                        const d = JSON.parse(s.textContent);
+                        const nodes = Array.isArray(d) ? d : [d];
+                        const prod = nodes.find(n => n && n['@type'] === 'Product');
+                        if (prod) return JSON.stringify(prod);
+                    } catch(e) {}
+                }
+                return null;
+            }""")
+
+            if jsonld_str:
+                data = json.loads(jsonld_str)
+                offers = data.get("offers", {})
+                if isinstance(offers, list):
+                    offers = min(offers, key=lambda o: float(o.get("price") or 999999))
+                price = float(offers.get("price") or 0) or None
+                if price:
+                    high = float(offers.get("highPrice") or 0)
+                    name = data.get("name", "")
+                    return {
+                        "price": price,
+                        "orig_price": high if high and high > price else None,
+                        "product_name": name,
+                        "url": url,
+                    }
+
+            # 2) DOM fallback — obecné selektory ceny
+            for price_sel in [
+                "[itemprop='price'][content]",
+                "[itemprop='price']",
+                "[data-test*='price']",
+                "[class*='actualPrice']",
+                "[class*='current-price']",
+                "[class*='price--final']",
+                ".price",
+            ]:
+                try:
+                    el = page.locator(price_sel).first
+                    if not await el.count():
+                        continue
+                    text = await el.get_attribute("content") or await el.inner_text(timeout=2_000)
+                    price = parse_price(text)
+                    if not price:
+                        continue
+                    name = ""
+                    for name_sel in ["h1[itemprop='name']", "[itemprop='name']", "h1"]:
+                        try:
+                            name = await page.locator(name_sel).first.inner_text(timeout=1_000)
+                            break
+                        except Exception:
+                            continue
+                    return {"price": price, "orig_price": None, "product_name": name.strip(), "url": url}
+                except Exception:
+                    continue
+
+        except Exception as e:
+            logger.error(f"get_price_from_url({url[:60]}): {e}")
+        finally:
+            await browser.close()
+    return result
+
 
 async def make_context(playwright) -> tuple[Browser, BrowserContext]:
     browser = await playwright.chromium.launch(

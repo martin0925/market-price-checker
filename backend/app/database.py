@@ -20,7 +20,7 @@ def init_db():
             name      TEXT NOT NULL,
             unit      TEXT NOT NULL DEFAULT '1 ks',
             category  TEXT NOT NULL DEFAULT 'Ostatní',
-            query     TEXT NOT NULL,          -- search keyword pro scraping
+            query     TEXT NOT NULL DEFAULT '', -- legacy, nahrazeno product_links
             created_at DATETIME DEFAULT CURRENT_TIMESTAMP
         );
 
@@ -31,6 +31,18 @@ def init_db():
             logo    TEXT NOT NULL,
             enabled INTEGER NOT NULL DEFAULT 1
         );
+
+        CREATE TABLE IF NOT EXISTS product_links (
+            id         INTEGER PRIMARY KEY AUTOINCREMENT,
+            item_id    INTEGER NOT NULL REFERENCES items(id) ON DELETE CASCADE,
+            store_id   TEXT    NOT NULL REFERENCES stores(id),
+            url        TEXT    NOT NULL,
+            label      TEXT    NOT NULL DEFAULT '',
+            active     INTEGER NOT NULL DEFAULT 1,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_pl_item ON product_links(item_id);
 
         CREATE TABLE IF NOT EXISTS price_history (
             id         INTEGER PRIMARY KEY AUTOINCREMENT,

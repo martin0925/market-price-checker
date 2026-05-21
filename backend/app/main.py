@@ -2,7 +2,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 from app.database import init_db
-from app.routers import items, prices, stores
+from app.routers import items, prices, stores, links
 
 
 @asynccontextmanager
@@ -26,6 +26,7 @@ app.add_middleware(
 )
 
 app.include_router(items.router, prefix="/api/items", tags=["items"])
+app.include_router(links.router, prefix="/api/items", tags=["links"])
 app.include_router(prices.router, prefix="/api/prices", tags=["prices"])
 app.include_router(stores.router, prefix="/api/stores", tags=["stores"])
 

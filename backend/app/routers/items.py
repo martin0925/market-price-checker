@@ -11,7 +11,6 @@ def _row_to_item(row) -> ItemOut:
         name=row["name"],
         unit=row["unit"],
         category=row["category"],
-        query=row["query"],
         created_at=row["created_at"],
     )
 
@@ -28,8 +27,8 @@ def list_items():
 def create_item(body: ItemCreate):
     conn = get_conn()
     cur = conn.execute(
-        "INSERT INTO items (name, unit, category, query) VALUES (?,?,?,?)",
-        (body.name, body.unit, body.category, body.query),
+        "INSERT INTO items (name, unit, category, query) VALUES (?,?,?,'') ",
+        (body.name, body.unit, body.category),
     )
     conn.commit()
     row = conn.execute("SELECT * FROM items WHERE id = ?", (cur.lastrowid,)).fetchone()
@@ -45,20 +44,28 @@ def get_item(item_id: int):
         conn.close()
         raise HTTPException(404, "Item nenalezen")
 
-    # Nejnovější cena per store
-    prices_raw = conn.execute(
+    # Všechny záznamy seřazené od nejnovějšího
+    rows = conn.execute(
         """SELECT ph.*, s.name as store_name
            FROM price_history ph
            JOIN stores s ON s.id = ph.store_id
            WHERE ph.item_id = ?
-             AND ph.fetched_at = (
-               SELECT MAX(ph2.fetched_at) FROM price_history ph2
-               WHERE ph2.item_id = ph.item_id AND ph2.store_id = ph.store_id
-             )
-           ORDER BY ph.price ASC""",
+           ORDER BY ph.fetched_at DESC, ph.price ASC""",
         (item_id,),
     ).fetchall()
     conn.close()
+
+    # Pro každý obchod: nejnovější den → nejlevnější varianta
+    store_latest_date: dict[str, str] = {}
+    store_best: dict[str, dict] = {}
+    for r in rows:
+        sid = r["store_id"]
+        row_date = r["fetched_at"][:10]
+        if sid not in store_latest_date:
+            store_latest_date[sid] = row_date
+        if row_date == store_latest_date[sid]:
+            if sid not in store_best or r["price"] < store_best[sid]["price"]:
+                store_best[sid] = dict(r)
 
     prices = [
         PriceEntry(
@@ -71,7 +78,7 @@ def get_item(item_id: int):
             url=r["url"],
             fetched_at=r["fetched_at"],
         )
-        for r in prices_raw
+        for r in sorted(store_best.values(), key=lambda x: x["price"])
     ]
 
     cheapest = prices[0] if prices else None
@@ -101,8 +108,8 @@ def update_item(item_id: int, body: ItemCreate):
         conn.close()
         raise HTTPException(404, "Item nenalezen")
     conn.execute(
-        "UPDATE items SET name=?, unit=?, category=?, query=? WHERE id=?",
-        (body.name, body.unit, body.category, body.query, item_id),
+        "UPDATE items SET name=?, unit=?, category=? WHERE id=?",
+        (body.name, body.unit, body.category, item_id),
     )
     conn.commit()
     row = conn.execute("SELECT * FROM items WHERE id = ?", (item_id,)).fetchone()

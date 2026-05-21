@@ -74,6 +74,30 @@ def _extract_discount(html: str) -> float | None:
     return None
 
 
+async def get_price_from_url(url: str) -> dict | None:
+    """Přímý fetch produktové stránky Kaufland — bez Playwright (httpx)."""
+    try:
+        async with httpx.AsyncClient(timeout=12, follow_redirects=True, headers=HEADERS) as client:
+            resp = await client.get(url)
+            if resp.status_code == 200:
+                html = resp.text
+                product = _extract_from_jsonld(html)
+                if product and product["price"]:
+                    orig = _extract_discount(html)
+                    return {
+                        "price": product["price"],
+                        "orig_price": orig if orig and orig > product["price"] else None,
+                        "product_name": product["name"],
+                        "url": url,
+                    }
+    except Exception as e:
+        logger.debug(f"Kaufland get_price_from_url HTTP fallback na Playwright: {e}")
+
+    # Playwright fallback
+    from .base import get_price_from_url as _generic
+    return await _generic(url)
+
+
 async def search_product(query: str) -> dict | None:
     search_url = f"{BASE}/search?search={query.replace(' ', '+')}"
 
