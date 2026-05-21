@@ -65,6 +65,22 @@ async function loadMeta() {
     .catch(() => null);
 }
 
+async function loadLinks(itemId) {
+  return fetch(`${API}/items/${itemId}/links`).then(r => r.json());
+}
+
+async function addLink(itemId, storeId, url, label) {
+  return fetch(`${API}/items/${itemId}/links`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ store_id: storeId, url, label }),
+  }).then(r => r.json());
+}
+
+async function deleteLink(linkId) {
+  return fetch(`${API}/items/links/${linkId}`, { method: "DELETE" });
+}
+
 async function reloadItemPrices(itemId) {
   const detail = await fetch(`${API}/items/${itemId}`).then(r => r.json());
   return Object.fromEntries(detail.prices.map(p => [p.store_id, {
@@ -129,6 +145,80 @@ function StoreBadge({ storeId, small }) {
 }
 
 // ── Price Card ─────────────────────────────────────────────────────────────
+
+function LinkManager({ itemId }) {
+  const [links, setLinks] = useState(null);
+  const [storeId, setStoreId] = useState(Object.keys(STORE_META)[0]);
+  const [url, setUrl] = useState("");
+  const [label, setLabel] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    loadLinks(itemId).then(setLinks).catch(() => setLinks([]));
+  }, [itemId]);
+
+  const handleAdd = async () => {
+    if (!url.trim()) return;
+    setSaving(true);
+    try {
+      const link = await addLink(itemId, storeId, url.trim(), label.trim());
+      setLinks(prev => [...prev, link]);
+      setUrl("");
+      setLabel("");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleDelete = async (linkId) => {
+    await deleteLink(linkId);
+    setLinks(prev => prev.filter(l => l.id !== linkId));
+  };
+
+  if (links === null) return <p className="no-data-label" style={{ padding: "12px 0" }}>Načítám odkazy…</p>;
+
+  return (
+    <div className="link-manager">
+      <p className="links-title">Produktové odkazy</p>
+      {links.length === 0 && (
+        <p className="no-data-label">Žádné odkazy — přidej URL produktu z e-shopu</p>
+      )}
+      {links.map(link => {
+        const meta = smeta(link.store_id);
+        return (
+          <div key={link.id} className="link-row">
+            <StoreBadge storeId={link.store_id} small />
+            <a href={link.url} target="_blank" rel="noreferrer" className="link-url" title={link.url}>
+              {link.label || link.url}
+            </a>
+            <button className="btn-icon btn-icon--danger link-delete" onClick={() => handleDelete(link.id)} title="Odebrat">×</button>
+          </div>
+        );
+      })}
+      <div className="add-link-form">
+        <select value={storeId} onChange={e => setStoreId(e.target.value)}>
+          {Object.entries(STORE_META).map(([id, m]) => <option key={id} value={id}>{m.name}</option>)}
+        </select>
+        <input
+          value={url}
+          onChange={e => setUrl(e.target.value)}
+          placeholder="URL produktu (např. rohlik.cz/…)"
+          onKeyDown={e => e.key === "Enter" && handleAdd()}
+        />
+        <input
+          value={label}
+          onChange={e => setLabel(e.target.value)}
+          placeholder="Popis (volitelné)"
+          style={{ maxWidth: "160px" }}
+          onKeyDown={e => e.key === "Enter" && handleAdd()}
+        />
+        <button className="btn btn--primary" onClick={handleAdd} disabled={saving || !url.trim()}>
+          {saving ? "…" : "+ Přidat"}
+        </button>
+      </div>
+    </div>
+  );
+}
 
 function PriceCard({ item, history, onRemove, onRefresh }) {
   const [expanded, setExpanded] = useState(false);
@@ -203,7 +293,7 @@ function PriceCard({ item, history, onRemove, onRefresh }) {
             <p className="updated-label">Aktualizováno: {fmtDate(cheapestData.fetched_at)}</p>
           )}
           {entries.length === 0 ? (
-            <p className="no-data-label" style={{ padding: "12px 0" }}>Žádné ceny</p>
+            <p className="no-data-label" style={{ padding: "12px 0" }}>Žádné ceny — přidej odkazy a spusť scrape</p>
           ) : (
             <div className="price-list">
               {entries.map(([sid, sv], i) => {
@@ -233,6 +323,7 @@ function PriceCard({ item, history, onRemove, onRefresh }) {
               })}
             </div>
           )}
+          {!IS_STATIC && <LinkManager itemId={item.id} />}
         </div>
       )}
     </div>
@@ -245,17 +336,16 @@ function AddModal({ onAdd, onClose }) {
   const [name, setName] = useState("");
   const [unit, setUnit] = useState("1 kg");
   const [category, setCategory] = useState(CATEGORIES[0]);
-  const [query, setQuery] = useState("");
   const [loading, setLoading] = useState(false);
 
   const handleSubmit = async () => {
-    if (!name.trim() || !query.trim()) return;
+    if (!name.trim()) return;
     setLoading(true);
     try {
       const res = await fetch(`${API}/items`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: name.trim(), unit, category, query: query.trim() }),
+        body: JSON.stringify({ name: name.trim(), unit, category }),
       });
       const newItem = await res.json();
       onAdd({ ...newItem, prices: {} });
@@ -271,7 +361,8 @@ function AddModal({ onAdd, onClose }) {
         <h2 className="modal-title">Přidat surovinu</h2>
         <div className="form-group">
           <label>Název</label>
-          <input value={name} onChange={e => setName(e.target.value)} placeholder="např. Špenát" autoFocus />
+          <input value={name} onChange={e => setName(e.target.value)} placeholder="např. Špenát" autoFocus
+            onKeyDown={e => e.key === "Enter" && handleSubmit()} />
         </div>
         <div className="form-row">
           <div className="form-group">
@@ -285,13 +376,12 @@ function AddModal({ onAdd, onClose }) {
             </select>
           </div>
         </div>
-        <div className="form-group">
-          <label>Hledaný výraz (pro scraper)</label>
-          <input value={query} onChange={e => setQuery(e.target.value)} placeholder="např. špenát listový" />
-        </div>
+        <p style={{ fontSize: "11px", color: "var(--muted)", marginBottom: "16px" }}>
+          Po přidání rozbal kartu a přidej produktové odkazy z e-shopů.
+        </p>
         <div className="modal-actions">
           <button className="btn btn--ghost" onClick={onClose}>Zrušit</button>
-          <button className="btn btn--primary" onClick={handleSubmit} disabled={loading}>
+          <button className="btn btn--primary" onClick={handleSubmit} disabled={loading || !name.trim()}>
             {loading ? "…" : "Přidat"}
           </button>
         </div>
@@ -542,6 +632,19 @@ function App() {
         .rank-name { font-size: 13px; flex: 1; }
         .rank-price { font-size: 14px; font-weight: 500; }
         .rank-covered { font-size: 11px; color: var(--muted); }
+
+        /* Link manager */
+        .link-manager { margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--border); }
+        .links-title { font-size: 10px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 8px; }
+        .link-row { display: flex; align-items: center; gap: 8px; padding: 5px 0; }
+        .link-url { font-size: 12px; color: var(--muted); flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-decoration: none; }
+        .link-url:hover { color: var(--accent); }
+        .link-delete { width: 22px; height: 22px; font-size: 14px; flex-shrink: 0; }
+        .add-link-form { display: flex; gap: 6px; margin-top: 10px; flex-wrap: wrap; }
+        .add-link-form select, .add-link-form input { background: var(--surface2); border: 1px solid var(--border); color: var(--text); border-radius: 6px; padding: 6px 10px; font-family: inherit; font-size: 12px; outline: none; }
+        .add-link-form select { flex-shrink: 0; }
+        .add-link-form input { flex: 1; min-width: 160px; }
+        .add-link-form input:focus, .add-link-form select:focus { border-color: var(--accent); }
 
         /* States */
         .loading-state { display: flex; align-items: center; justify-content: center; height: 60vh; color: var(--muted); font-size: 14px; }
